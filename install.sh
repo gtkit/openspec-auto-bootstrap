@@ -164,6 +164,11 @@ copy_file() {
   local src="$1"
   local dest="$2"
   mkdir -p "$(dirname "$dest")"
+  if [[ -e "$dest" ]] && ! cmp -s "$src" "$dest"; then
+    if [[ "$FORCE" -ne 1 ]]; then
+      die "Managed file differs from the template: $dest. Re-run with --force to overwrite it."
+    fi
+  fi
   backup_path "$dest" "$REPO_DIR"
   cp "$src" "$dest"
 }

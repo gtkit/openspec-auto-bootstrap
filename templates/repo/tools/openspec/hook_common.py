@@ -32,6 +32,10 @@ DOC_ONLY_HINT = re.compile(r"(^|/)(readme|docs?/|.*\.md$)", re.I)
 COMPLETION_HINT = re.compile(r"\b(done|complete|completed|fixed|verified|all tests pass|ready)\b|(已完成|完成了|修复好了|验证通过|测试通过)")
 
 
+class OpenSpecRuntimeError(RuntimeError):
+    pass
+
+
 def run_command(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     prefix = openspec_prefix() if args and args[0] == "openspec" else []
     return subprocess.run(
@@ -43,6 +47,13 @@ def run_command(args: list[str], cwd: Path | None = None) -> subprocess.Complete
         stderr=subprocess.STDOUT,
         check=False,
     )
+
+
+def command_detail(result: subprocess.CompletedProcess[str], command_name: str) -> str:
+    output = result.stdout.strip()
+    if output:
+        return output.splitlines()[-1]
+    return f"{command_name} failed with exit code {result.returncode}"
 
 
 def version_ok(version: str) -> bool:
@@ -160,29 +171,74 @@ def classify_prompt(text: str) -> dict[str, Any]:
     }
 
 
-def openspec_list() -> list[dict[str, Any]]:
-    result = run_command(["openspec", "list", "--json"])
+def openspec_list(cwd: Path | None = None) -> list[dict[str, Any]]:
+    result = run_command(["openspec", "list", "--json"], cwd=cwd)
+    if result.returncode != 0:
+        raise OpenSpecRuntimeError(command_detail(result, "openspec list"))
     payload = extract_json_blob(result.stdout)
-    if isinstance(payload, dict):
-        return payload.get("changes", []) or []
-    return []
+    if not isinstance(payload, dict):
+        raise OpenSpecRuntimeError("openspec list did not return JSON output")
+    return payload.get("changes", []) or []
 
 
-def openspec_status(change_name: str) -> dict[str, Any] | None:
-    result = run_command(["openspec", "status", "--change", change_name, "--json"])
+def openspec_status(change_name: str, cwd: Path | None = None) -> dict[str, Any] | None:
+    result = run_command(["openspec", "status", "--change", change_name, "--json"], cwd=cwd)
+    if result.returncode != 0:
+        raise OpenSpecRuntimeError(command_detail(result, f"openspec status --change {change_name}"))
     payload = extract_json_blob(result.stdout)
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        raise OpenSpecRuntimeError(f"openspec status for `{change_name}` did not return JSON output")
+    return payload
 
 
-def validate_change(change_name: str) -> tuple[bool, dict[str, Any] | None]:
+def validate_change(change_name: str, cwd: Path | None = None) -> tuple[bool, dict[str, Any] | None]:
     result = run_command(
-        ["openspec", "validate", change_name, "--type", "change", "--strict", "--json", "--no-interactive"]
+        ["openspec", "validate", change_name, "--type", "change", "--strict", "--json", "--no-interactive"],
+        cwd=cwd,
     )
     payload = extract_json_blob(result.stdout)
+    if result.returncode != 0 and not isinstance(payload, dict):
+        raise OpenSpecRuntimeError(command_detail(result, f"openspec validate {change_name}"))
     if isinstance(payload, dict):
         summary = payload.get("summary", {}).get("totals", {})
         return bool(summary.get("failed", 0) == 0 and result.returncode == 0), payload
     return result.returncode == 0, None
+
+
+def current_change_path() -> Path:
+    return REPO_ROOT / ".openspec-auto" / "state" / "current_change.json"
+
+
+def read_current_change(changes: list[dict[str, Any]] | None = None) -> str | None:
+    path = current_change_path()
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        path.unlink(missing_ok=True)
+        return None
+    name = payload.get("name")
+    if not isinstance(name, str) or not name.strip():
+        path.unlink(missing_ok=True)
+        return None
+    selected = name.strip()
+    if changes is not None:
+        active = {item.get("name") for item in changes if item.get("name")}
+        if selected not in active:
+            path.unlink(missing_ok=True)
+            return None
+    return selected
+
+
+def write_current_change(change_name: str) -> None:
+    path = current_change_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"name": change_name}, ensure_ascii=False, indent=2) + "\n")
+
+
+def clear_current_change() -> None:
+    current_change_path().unlink(missing_ok=True)
 
 
 def select_change(prompt_text: str, changes: list[dict[str, Any]]) -> str | None:
@@ -194,6 +250,19 @@ def select_change(prompt_text: str, changes: list[dict[str, Any]]) -> str | None
     return names[0] if len(names) == 1 else None
 
 
+def resolve_current_change(prompt_text: str, changes: list[dict[str, Any]]) -> tuple[str | None, str]:
+    selected = select_change(prompt_text, changes)
+    if selected:
+        write_current_change(selected)
+        return selected, "prompt"
+
+    saved = read_current_change(changes)
+    if saved:
+        return saved, "state"
+
+    return None, "missing"
+
+
 def is_apply_ready(status: dict[str, Any] | None) -> bool:
     if not status:
         return False
@@ -202,13 +271,44 @@ def is_apply_ready(status: dict[str, Any] | None) -> bool:
     return bool(needed) and all(artifacts.get(item) == "done" for item in needed)
 
 
-def git_changed_paths() -> list[str]:
+def git_changed_paths(
+    *,
+    base_ref: str | None = None,
+    head_ref: str = "HEAD",
+    cwd: Path | None = None,
+    include_worktree: bool = True,
+    include_untracked: bool = True,
+) -> list[str]:
     names: set[str] = set()
-    for args in (
-        ["git", "diff", "--name-only", "--cached"],
-        ["git", "diff", "--name-only"],
-    ):
-        result = run_command(args)
+    if base_ref:
+        merge_base = run_command(["git", "merge-base", base_ref, head_ref], cwd=cwd)
+        if merge_base.returncode != 0:
+            raise OpenSpecRuntimeError(command_detail(merge_base, f"git merge-base {base_ref} {head_ref}"))
+        merge_base_sha = merge_base.stdout.strip()
+        if not merge_base_sha:
+            raise OpenSpecRuntimeError(f"Unable to resolve merge-base between `{base_ref}` and `{head_ref}`")
+        diff_result = run_command(["git", "diff", "--name-only", f"{merge_base_sha}..{head_ref}"], cwd=cwd)
+        if diff_result.returncode != 0:
+            raise OpenSpecRuntimeError(command_detail(diff_result, f"git diff {merge_base_sha}..{head_ref}"))
+        for line in diff_result.stdout.splitlines():
+            line = line.strip()
+            if line:
+                names.add(line)
+    if include_worktree:
+        diff_commands = (
+            ["git", "diff", "--name-only", "--cached"],
+            ["git", "diff", "--name-only"],
+        )
+    else:
+        diff_commands = ()
+    for args in diff_commands:
+        result = run_command(args, cwd=cwd)
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line:
+                names.add(line)
+    if include_untracked:
+        result = run_command(["git", "ls-files", "--others", "--exclude-standard"], cwd=cwd)
         for line in result.stdout.splitlines():
             line = line.strip()
             if line:
@@ -221,35 +321,57 @@ def non_openspec_changes(paths: list[str]) -> list[str]:
 
 
 def build_session_context() -> str:
-    changes = openspec_list()
+    try:
+        changes = openspec_list()
+    except OpenSpecRuntimeError as exc:
+        clear_current_change()
+        return (
+            "OpenSpec repo mode is enabled in this repository.\n"
+            f"OpenSpec CLI state could not be read: {exc}\n"
+            "Do not proceed with behavior-changing work until the OpenSpec CLI is healthy."
+        )
+    selected = read_current_change(changes)
     if not changes:
+        clear_current_change()
         return (
             "OpenSpec repo mode is enabled in this repository.\n"
             "There are no active changes right now.\n"
             "If the user asks for behavior-changing work, use the project skill `openspec-auto` and create a change automatically."
         )
     bullet_lines = [f"- {item['name']} ({item.get('status', 'unknown')})" for item in changes if item.get("name")]
-    return (
+    context = (
         "OpenSpec repo mode is enabled in this repository.\n"
         "Active changes:\n"
         + "\n".join(bullet_lines)
         + "\nUse the project skill `openspec-auto` for behavior-changing work and do not ask the user to type OpenSpec commands manually."
     )
+    if selected:
+        context += f"\nCurrent selected change: `{selected}`."
+    return context
 
 
 def build_router_context(prompt_text: str) -> str | None:
     classification = classify_prompt(prompt_text)
     if not classification["needs_openspec"]:
         return None
-    changes = openspec_list()
-    selected = select_change(prompt_text, changes)
+    try:
+        changes = openspec_list()
+    except OpenSpecRuntimeError as exc:
+        clear_current_change()
+        return (
+            "This request appears to change runtime behavior.\n"
+            f"OpenSpec CLI state could not be read: {exc}\n"
+            "Do not edit application code until OpenSpec is healthy."
+        )
+    selected, source = resolve_current_change(prompt_text, changes)
     if selected:
         return (
             "This request appears to change runtime behavior.\n"
-            f"Route it through the project skill `openspec-auto` and prefer the active change `{selected}`.\n"
+            f"Route it through the project skill `openspec-auto` and use the active change `{selected}` selected from {source}.\n"
             "Do not ask the user to type OpenSpec commands manually."
         )
     if changes:
+        clear_current_change()
         names = ", ".join(item["name"] for item in changes if item.get("name"))
         return (
             "This request appears to change runtime behavior.\n"
@@ -257,6 +379,7 @@ def build_router_context(prompt_text: str) -> str | None:
             f"Active changes exist: {names}. If more than one is plausible, ask the user to choose.\n"
             "Do not ask the user to type OpenSpec commands manually."
         )
+    clear_current_change()
     return (
         "This request appears to change runtime behavior.\n"
         "Route it through the project skill `openspec-auto`, create a new change automatically, and prepare it until apply-ready before editing application code.\n"
@@ -269,18 +392,26 @@ def should_allow_edit(payload_text: str) -> tuple[bool, str]:
     if classification["skip_requested"]:
         return True, "User explicitly asked to bypass OpenSpec."
     if not payload_text.strip():
-        return True, "No structured hook payload; fail open."
+        return False, "Hook payload is empty, so OpenSpec state cannot be verified safely."
     if DOC_ONLY_HINT.search(payload_text) and not CODE_FILE_HINT.search(payload_text):
         return True, "Docs-only path detected."
-    changes = openspec_list()
+    try:
+        changes = openspec_list()
+    except OpenSpecRuntimeError as exc:
+        return False, f"OpenSpec CLI state could not be read: {exc}"
     if not changes:
+        clear_current_change()
         return False, "No active OpenSpec change exists yet."
-    selected = select_change(payload_text, changes)
+    selected, source = resolve_current_change(payload_text, changes)
     if not selected:
-        return False, "Multiple active changes exist and none could be chosen safely."
-    status = openspec_status(selected)
+        active = ", ".join(item["name"] for item in changes if item.get("name"))
+        return False, f"Multiple active changes exist and none is selected. Active changes: {active}. Ask the user to choose one explicitly."
+    try:
+        status = openspec_status(selected)
+    except OpenSpecRuntimeError as exc:
+        return False, f"Unable to read OpenSpec status for `{selected}`: {exc}"
     if is_apply_ready(status):
-        return True, f"Change `{selected}` is apply-ready."
+        return True, f"Change `{selected}` is apply-ready from {source}."
     return False, f"Change `{selected}` exists but is not apply-ready yet."
 
 
@@ -288,13 +419,24 @@ def should_block_completion(payload_text: str) -> tuple[bool, str]:
     if not COMPLETION_HINT.search(payload_text):
         return False, ""
     changed_paths = non_openspec_changes(git_changed_paths())
-    changes = openspec_list()
+    try:
+        changes = openspec_list()
+    except OpenSpecRuntimeError as exc:
+        return True, f"Completion is blocked because OpenSpec state could not be read: {exc}"
     if changed_paths and not changes:
         preview = ", ".join(changed_paths[:5])
         return True, f"Code changed outside openspec/ but there is no active OpenSpec change. Files: {preview}"
-    selected = select_change(payload_text, changes)
+    if not changes:
+        return False, ""
+    selected, _ = resolve_current_change(payload_text, changes)
+    if not selected:
+        active = ", ".join(item["name"] for item in changes if item.get("name"))
+        return True, f"Completion is blocked because multiple active changes exist and no current change is selected. Choose one of: {active}"
     if selected:
-        valid, payload = validate_change(selected)
+        try:
+            valid, payload = validate_change(selected)
+        except OpenSpecRuntimeError as exc:
+            return True, f"Completion is blocked because change `{selected}` could not be validated: {exc}"
         if not valid:
             issues: list[str] = []
             if isinstance(payload, dict):
