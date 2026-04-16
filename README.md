@@ -548,6 +548,27 @@ cp ./bin/openspec-auto /usr/local/bin/openspec-auto
 cp ./bin/openspec-auto "$HOME/go/bin/openspec-auto"
 ```
 
+### 4.3 直接使用兼容 shell 脚本
+
+如果你已经 clone 了这个仓库，但暂时不想安装二进制，也仍然可以直接使用根目录下的兼容脚本：
+
+```bash
+./install.sh /absolute/path/to/your-repo
+./doctor.sh
+./doctor.sh /absolute/path/to/repo
+./uninstall.sh /absolute/path/to/repo
+```
+
+`install.sh` 也支持和 CLI 对齐的参数：
+
+```bash
+./install.sh --force /absolute/path/to/your-repo
+./install.sh --skip-codex-user-config /absolute/path/to/your-repo
+./install.sh --skip-openspec-init /absolute/path/to/your-repo
+```
+
+兼容脚本仍然可用，但后续默认入口是 `openspec-auto` 二进制。
+
 然后把它接到业务仓库：
 
 ```bash
