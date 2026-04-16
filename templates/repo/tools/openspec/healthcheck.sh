@@ -128,6 +128,29 @@ if errors:
 print("[openspec-auto] installation integrity verified")
 PY
 
+# Verify Codex user config has codex_hooks enabled
+if command -v codex >/dev/null 2>&1; then
+  python3 - <<'PY'
+import re
+import sys
+from pathlib import Path
+
+config_path = Path.home() / ".codex" / "config.toml"
+if not config_path.exists():
+    print("[openspec-auto][error] ~/.codex/config.toml not found — Codex repo-local hooks will not fire", file=sys.stderr)
+    print("[openspec-auto][error] Run: mkdir -p ~/.codex && echo '[features]\ncodex_hooks = true' >> ~/.codex/config.toml", file=sys.stderr)
+    sys.exit(1)
+
+text = config_path.read_text()
+if not re.search(r"^\s*codex_hooks\s*=\s*true\b", text, re.M):
+    print("[openspec-auto][error] ~/.codex/config.toml exists but codex_hooks is not enabled", file=sys.stderr)
+    print("[openspec-auto][error] Add 'codex_hooks = true' under [features] in ~/.codex/config.toml", file=sys.stderr)
+    sys.exit(1)
+
+print("[openspec-auto] codex_hooks = true verified in ~/.codex/config.toml")
+PY
+fi
+
 if command -v claude >/dev/null 2>&1; then
   printf '[openspec-auto] claude=%s\n' "$(claude -v 2>/dev/null || printf 'unknown')"
 else
