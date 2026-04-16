@@ -20,16 +20,33 @@ READ_ONLY_PATTERNS = [
     r"(解释|分析|审查|总结|说明|对比|为什么|怎么做)",
 ]
 CHANGE_PATTERNS = [
-    r"\b(add|build|change|create|fix|implement|modify|refactor|remove|rename|update|wire)\b",
-    r"(实现|修复|修改|新增|增加|调整|重构|删除|改成|接入|联调|优化)",
+    r"\b(add|build|change|connect|convert|create|delete|deprecate|disable|edit|enable|expose|extract"
+    r"|fix|implement|integrate|merge|migrate|modify|move|patch|refactor|remove|rename|replace|rewrite"
+    r"|setup|split|support|switch|update|upgrade|wire|wrap|write)\b",
+    r"(实现|修复|修改|新增|增加|调整|重构|删除|改成|接入|联调|优化"
+    r"|支持|迁移|迁到|切换|换成|启用|禁用|替换|升级|降级|配置|对接|拆分|合并|封装|引入|开放|编辑|写入|改写|重写)",
 ]
 SKIP_PATTERNS = [
     r"\b(skip openspec|without openspec)\b",
     r"(跳过\s*openspec|不用\s*openspec|不要\s*openspec)",
 ]
-CODE_FILE_HINT = re.compile(r"\.(c|cc|cpp|cs|go|java|js|jsx|kt|mjs|php|py|rb|rs|sql|swift|ts|tsx|vue|yaml|yml)\b", re.I)
+FALSE_POSITIVE_PATTERNS = [
+    r"\b(build|run)\s+(and\s+)?(run\s+)?(the\s+)?tests?\b",
+    r"\bcreate\s+(a\s+)?(new\s+)?(pr|pull\s*request|branch|tag|issue|ticket|commit)\b",
+    r"\b(add|write)\s+(a\s+)?(new\s+)?comment\b",
+    r"\brun\s+(the\s+)?(linter|formatter|ci|pipeline|migration)\b",
+    r"\b(write|edit)\s+(the\s+)?(readme|docs?|documentation|changelog)\b",
+    r"\bdelete\s+(\w+\s+)*(branch|tag|pr|pull\s*request|comment)\b",
+]
+CODE_FILE_HINT = re.compile(
+    r"\.(c|cc|cpp|cs|go|java|js|jsx|kt|mjs|php|py|rb|rs|sql|swift|ts|tsx|vue|yaml|yml"
+    r"|toml|json|conf|cfg|ini|env|envrc|properties|gradle|lock|xml|proto|graphql|tf|hcl"
+    r"|sh|bash|zsh|fish|ps1|bat|cmd|awk|sed|pl|lua|r|jl|ex|exs|erl|hs|scala|groovy)\b"
+    r"|(^|[\s/])(Makefile|Dockerfile|Gemfile|Vagrantfile|Procfile|Justfile|Taskfile|Rakefile)\b",
+    re.I,
+)
 DOC_ONLY_HINT = re.compile(r"(^|/)(readme|docs?/|.*\.md$)", re.I)
-COMPLETION_HINT = re.compile(r"\b(done|complete|completed|fixed|verified|all tests pass|ready)\b|(已完成|完成了|修复好了|验证通过|测试通过)")
+COMPLETION_HINT = re.compile(r"\b(done|complete|completed|fixed|verified|all tests pass)\b|(已完成|完成了|修复好了|验证通过|测试通过)")
 
 
 class OpenSpecRuntimeError(RuntimeError):
@@ -57,7 +74,10 @@ def command_detail(result: subprocess.CompletedProcess[str], command_name: str) 
 
 
 def version_ok(version: str) -> bool:
-    parts = tuple(int(p) for p in version.split("."))
+    try:
+        parts = tuple(int(p.split("-")[0]) for p in version.split(".")[:3])
+    except (ValueError, IndexError):
+        return False
     required = (20, 19, 0)
     padded = parts + (0,) * (3 - len(parts))
     return padded >= required
@@ -86,7 +106,10 @@ def resolve_node_bin() -> str | None:
         version = result.stdout.strip()
         if result.returncode != 0 or not version or not version_ok(version):
             continue
-        key = tuple(int(part) for part in version.split("."))
+        try:
+            key = tuple(int(part.split("-")[0]) for part in version.split(".")[:3])
+        except (ValueError, IndexError):
+            continue
         if key > best_version:
             best = candidate
             best_version = key
@@ -161,6 +184,8 @@ def classify_prompt(text: str) -> dict[str, Any]:
     skip = any(re.search(pattern, normalized) for pattern in SKIP_PATTERNS)
     read_only = any(re.search(pattern, normalized) for pattern in READ_ONLY_PATTERNS)
     needs_change = any(re.search(pattern, normalized) for pattern in CHANGE_PATTERNS)
+    if needs_change and any(re.search(pattern, normalized) for pattern in FALSE_POSITIVE_PATTERNS):
+        needs_change = False
     needs_openspec = bool(needs_change and not skip)
     if read_only and not needs_change:
         needs_openspec = False
@@ -244,9 +269,9 @@ def clear_current_change() -> None:
 def select_change(prompt_text: str, changes: list[dict[str, Any]]) -> str | None:
     normalized = prompt_text.lower()
     names = [item.get("name", "") for item in changes if item.get("name")]
-    for name in names:
-        if name.lower() in normalized:
-            return name
+    matched = [name for name in names if name.lower() in normalized]
+    if matched:
+        return max(matched, key=len)
     return names[0] if len(names) == 1 else None
 
 
@@ -395,6 +420,8 @@ def should_allow_edit(payload_text: str) -> tuple[bool, str]:
         return False, "Hook payload is empty, so OpenSpec state cannot be verified safely."
     if DOC_ONLY_HINT.search(payload_text) and not CODE_FILE_HINT.search(payload_text):
         return True, "Docs-only path detected."
+    if not classification["needs_openspec"] and not CODE_FILE_HINT.search(payload_text):
+        return True, "No behavior-changing intent or code file target detected."
     try:
         changes = openspec_list()
     except OpenSpecRuntimeError as exc:

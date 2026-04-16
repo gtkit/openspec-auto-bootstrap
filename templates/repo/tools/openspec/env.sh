@@ -24,7 +24,10 @@ import sys
 from itertools import zip_longest
 
 required = (20, 19, 0)
-parts = tuple(int(p) for p in sys.argv[1].split("."))
+try:
+    parts = tuple(int(p.split("-")[0]) for p in sys.argv[1].split(".")[:3])
+except (ValueError, IndexError):
+    sys.exit(1)
 for left, right in zip_longest(parts, required, fillvalue=0):
     if left > right:
         sys.exit(0)
@@ -43,7 +46,10 @@ import subprocess
 import sys
 
 def version_ok(version: str) -> bool:
-    parts = tuple(int(p) for p in version.split("."))
+    try:
+        parts = tuple(int(p.split("-")[0]) for p in version.split(".")[:3])
+    except (ValueError, IndexError):
+        return False
     required = (20, 19, 0)
     padded = parts + (0,) * (3 - len(parts))
     return padded >= required
@@ -68,7 +74,10 @@ for candidate in candidates:
     version = node_version(candidate)
     if not version or not version_ok(version):
         continue
-    key = tuple(int(p) for p in version.split("."))
+    try:
+        key = tuple(int(p.split("-")[0]) for p in version.split(".")[:3])
+    except (ValueError, IndexError):
+        continue
     if key > best_version:
         best = candidate
         best_version = key

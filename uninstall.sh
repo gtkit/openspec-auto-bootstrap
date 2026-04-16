@@ -68,6 +68,7 @@ remove_path "$REPO_DIR/tools/openspec/resolve_change.py"
 remove_path "$REPO_DIR/tools/openspec/validate_repo.py"
 remove_path "$REPO_DIR/tools/openspec/sync_templates.sh"
 remove_path "$REPO_DIR/tools/openspec/__pycache__"
+remove_path "$REPO_DIR/.openspec-auto"
 
 python3 - "$REPO_DIR/.claude/settings.json" "$REPO_DIR/.codex/hooks.json" <<'PY'
 from pathlib import Path
@@ -120,6 +121,24 @@ PY
 then
   printf '[openspec-auto][warn] Failed to clean ~/.codex/config.toml automatically. Remove openspec-auto markers manually if needed.\n' >&2
 fi
+
+# Remove directories if empty after cleanup
+for dir in \
+  "$REPO_DIR/.claude/hooks" \
+  "$REPO_DIR/.claude/skills/openspec-auto" \
+  "$REPO_DIR/.claude/skills" \
+  "$REPO_DIR/.agents/skills/openspec-auto" \
+  "$REPO_DIR/.agents/skills" \
+  "$REPO_DIR/.agents" \
+  "$REPO_DIR/.codex/hooks" \
+  "$REPO_DIR/.codex/prompts" \
+  "$REPO_DIR/tools/openspec" \
+  "$REPO_DIR/tools"
+do
+  if [[ -d "$dir" ]] && [[ -z "$(ls -A "$dir" 2>/dev/null)" ]]; then
+    rmdir "$dir" 2>/dev/null || true
+  fi
+done
 
 cat <<EOF
 Uninstall complete for:

@@ -20,7 +20,15 @@ import sys
 from itertools import zip_longest
 
 required = (20, 19, 0)
-parts = tuple(int(p) for p in sys.argv[1].split(".")) if sys.argv[1] else ()
+raw = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else ""
+if not raw:
+    print("[openspec-auto][error] Node.js version could not be detected", file=sys.stderr)
+    sys.exit(1)
+try:
+    parts = tuple(int(p.split("-")[0]) for p in raw.split(".")[:3])
+except (ValueError, IndexError):
+    print("[openspec-auto][error] Node.js version format not recognized: " + raw, file=sys.stderr)
+    sys.exit(1)
 for left, right in zip_longest(parts, required, fillvalue=0):
     if left > right:
         sys.exit(0)
@@ -35,7 +43,90 @@ PY
   OPENSPEC_TELEMETRY=0 bash -lc "$RUNNER list --json >/dev/null"
 )
 
-python3 "$REPO_DIR/tools/openspec/validate_repo.py" --repo "$REPO_DIR" --smoke
+# Verify installation completeness: hook files, config registrations, managed blocks
+python3 - "$REPO_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+errors = []
+
+# Check critical hook files exist (Claude + Codex + shared tools)
+for hook in (
+    ".claude/hooks/openspec_context.py",
+    ".claude/hooks/openspec_router.py",
+    ".claude/hooks/openspec_guard.py",
+    ".claude/hooks/openspec_stop.py",
+    ".codex/hooks/openspec_context.py",
+    ".codex/hooks/openspec_router.py",
+    ".codex/hooks/openspec_guard.py",
+    ".codex/hooks/openspec_stop.py",
+    "tools/openspec/hook_common.py",
+):
+    if not (repo / hook).is_file():
+        errors.append(f"missing file: {hook}")
+
+# Check skill definitions
+for skill in (
+    ".claude/skills/openspec-auto/SKILL.md",
+    ".agents/skills/openspec-auto/SKILL.md",
+):
+    if not (repo / skill).is_file():
+        errors.append(f"missing file: {skill}")
+
+# Check Claude settings.json has openspec hook registrations
+claude_settings = repo / ".claude" / "settings.json"
+if claude_settings.exists():
+    try:
+        hooks = json.loads(claude_settings.read_text()).get("hooks", {})
+        for event in ("SessionStart", "UserPromptSubmit", "PreToolUse", "Stop"):
+            found = any(
+                "openspec_" in h.get("command", "")
+                for entry in hooks.get(event, [])
+                for h in entry.get("hooks", [])
+            )
+            if not found:
+                errors.append(f"settings.json missing openspec hook for {event}")
+    except (json.JSONDecodeError, AttributeError) as exc:
+        errors.append(f"settings.json parse error: {exc}")
+else:
+    errors.append("missing file: .claude/settings.json")
+
+# Check Codex hooks.json has openspec hook registrations
+codex_hooks = repo / ".codex" / "hooks.json"
+if codex_hooks.exists():
+    try:
+        hooks = json.loads(codex_hooks.read_text()).get("hooks", {})
+        for event in ("SessionStart", "UserPromptSubmit", "PreToolUse", "Stop"):
+            found = any(
+                "openspec_" in h.get("command", "")
+                for entry in hooks.get(event, [])
+                for h in entry.get("hooks", [])
+            )
+            if not found:
+                errors.append(f"hooks.json missing openspec hook for {event}")
+    except (json.JSONDecodeError, AttributeError) as exc:
+        errors.append(f"hooks.json parse error: {exc}")
+else:
+    errors.append("missing file: .codex/hooks.json")
+
+# Check managed blocks in rule files
+for name in ("AGENTS.md", "CLAUDE.md"):
+    path = repo / name
+    if path.exists():
+        if "OPENSPEC-AUTO:START" not in path.read_text():
+            errors.append(f"{name} missing OPENSPEC-AUTO managed block")
+    else:
+        errors.append(f"missing file: {name}")
+
+if errors:
+    for e in errors:
+        print(f"[openspec-auto][error] {e}", file=sys.stderr)
+    sys.exit(1)
+
+print("[openspec-auto] installation integrity verified")
+PY
 
 if command -v claude >/dev/null 2>&1; then
   printf '[openspec-auto] claude=%s\n' "$(claude -v 2>/dev/null || printf 'unknown')"

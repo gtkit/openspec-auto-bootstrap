@@ -750,8 +750,7 @@ Claude Code 侧：
 
 Codex 侧：
 
-- 当前按保守策略只挂 `Bash`
-- 这是因为 Codex hooks 能力还在演进，不能假设它已经像 Claude 一样完整拦截所有写入工具
+- 同样拦截 `Edit | Write | MultiEdit | Bash`，与 Claude Code 保持一致
 
 ### 9.4 Stop
 
@@ -906,22 +905,13 @@ OPENSPEC_TELEMETRY=0
 - `.agents/skills`
 - repo-local hook 机制
 
-当前要保守看待的点：
+Codex 的 PreToolUse 现在同样拦截 `Edit | Write | MultiEdit | Bash`，与 Claude Code 保持一致。两个平台共享同一套守门逻辑。
 
-- 对非 Bash 类写入工具的 PreToolUse 拦截能力，不建议过度假设
-
-因此：
-
-- Codex 侧必须同时依赖：
-  - `AGENTS.md`
-  - `.agents/skills/openspec-auto`
-  - `Stop` hook
-  - CI 门禁
-
-一句话总结：
-
-- **Claude 侧偏“前置强约束”**
-- **Codex 侧偏“规则 + 收口 + CI 兜底”**
+Codex 侧同样多层防御：
+  - `AGENTS.md` 规则层
+  - `.agents/skills/openspec-auto` 技能引导
+  - `PreToolUse` / `Stop` hook 运行时守门
+  - CI 门禁兜底
 
 ---
 

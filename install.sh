@@ -81,7 +81,10 @@ import sys
 from itertools import zip_longest
 
 required = (20, 19, 0)
-parts = tuple(int(p) for p in sys.argv[1].split("."))
+try:
+    parts = tuple(int(p.split("-")[0]) for p in sys.argv[1].split(".")[:3])
+except (ValueError, IndexError):
+    sys.exit(1)
 for left, right in zip_longest(parts, required, fillvalue=0):
     if left > right:
         sys.exit(0)
@@ -100,7 +103,10 @@ import subprocess
 import sys
 
 def version_ok(version: str) -> bool:
-    parts = tuple(int(p) for p in version.split("."))
+    try:
+        parts = tuple(int(p.split("-")[0]) for p in version.split(".")[:3])
+    except (ValueError, IndexError):
+        return False
     required = (20, 19, 0)
     padded = parts + (0,) * (3 - len(parts))
     return padded >= required
@@ -125,7 +131,10 @@ for candidate in candidates:
     version = node_version(candidate)
     if not version or not version_ok(version):
         continue
-    key = tuple(int(p) for p in version.split("."))
+    try:
+        key = tuple(int(p.split("-")[0]) for p in version.split(".")[:3])
+    except (ValueError, IndexError):
+        continue
     if key > best_version:
         best = candidate
         best_version = key
@@ -164,7 +173,10 @@ copy_file() {
   local src="$1"
   local dest="$2"
   mkdir -p "$(dirname "$dest")"
-  if [[ -e "$dest" ]] && ! cmp -s "$src" "$dest"; then
+  if [[ -e "$dest" ]]; then
+    if cmp -s "$src" "$dest"; then
+      return 0
+    fi
     if [[ "$FORCE" -ne 1 ]]; then
       die "Managed file differs from the template: $dest. Re-run with --force to overwrite it."
     fi
@@ -329,6 +341,10 @@ backup_path "$REPO_DIR/CLAUDE.md" "$REPO_DIR"
 ensure_line_once "$REPO_DIR/CLAUDE.md" "@AGENTS.md"
 upsert_managed_block "$REPO_DIR/CLAUDE.md" "$BOOTSTRAP_DIR/templates/repo/CLAUDE.md"
 
+log "Ensuring runtime directories are git-ignored"
+ensure_line_once "$REPO_DIR/.gitignore" ".openspec-auto/"
+ensure_line_once "$REPO_DIR/.gitignore" ".openspec-auto-backup/"
+
 log "Installing repo-local hook configs and skills"
 copy_file "$BOOTSTRAP_DIR/templates/repo/.claude/hooks/openspec_context.py" "$REPO_DIR/.claude/hooks/openspec_context.py"
 copy_file "$BOOTSTRAP_DIR/templates/repo/.claude/hooks/openspec_router.py" "$REPO_DIR/.claude/hooks/openspec_router.py"
@@ -375,6 +391,11 @@ if [[ "$SKIP_CODEX_USER_CONFIG" -eq 0 ]]; then
 else
   warn "Skipped ~/.codex/config.toml patch. You must enable codex_hooks manually."
 fi
+
+log "Writing bootstrap version"
+BOOTSTRAP_VERSION="$(cat "$BOOTSTRAP_DIR/VERSION" 2>/dev/null || echo "unknown")"
+mkdir -p "$REPO_DIR/.openspec-auto"
+printf '%s\n' "$BOOTSTRAP_VERSION" > "$REPO_DIR/.openspec-auto/version"
 
 log "Running repo healthcheck"
 "$REPO_DIR/tools/openspec/healthcheck.sh" "$REPO_DIR"
