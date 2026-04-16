@@ -641,6 +641,8 @@ codex_hooks = true
 - 不修改 `~/.codex/config.toml`
 - 适合你自己要手工管理 Codex 全局配置的场景
 
+> **注意**：使用此选项时，体检（healthcheck）仍会通过，但会输出警告。Codex 的 repo-local hooks **不会生效**，直到你手工在 `~/.codex/config.toml` 的 `[features]` 下添加 `codex_hooks = true`。
+
 ### 6.3 `--skip-openspec-init`
 
 ```bash
