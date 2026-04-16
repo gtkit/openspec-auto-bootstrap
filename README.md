@@ -508,7 +508,34 @@ sequenceDiagram
 
 ## 4. 快速安装
 
-先构建二进制：
+有两种方式安装二进制。
+
+### 4.1 用 `go install`
+
+如果你已经 clone 了这个仓库，可以在仓库根目录执行：
+
+```bash
+go install ./cmd/openspec-auto
+```
+
+默认会安装到 `$(go env GOBIN)`，如果 `GOBIN` 为空，则安装到 `$(go env GOPATH)/bin`。
+
+如果你要明确安装到指定目录，可以这样执行：
+
+```bash
+GOBIN="$HOME/go/bin" go install ./cmd/openspec-auto
+GOBIN="/usr/local/bin" go install ./cmd/openspec-auto
+```
+
+如果你不想先 clone 仓库，也可以直接按版本安装：
+
+```bash
+go install github.com/gtkit/openspec-auto-bootstrap/cmd/openspec-auto@v1.2.0
+```
+
+### 4.2 用 `go build`
+
+如果你希望先在当前仓库里构建，再手工复制，也可以：
 
 ```bash
 go build -o ./bin/openspec-auto ./cmd/openspec-auto
