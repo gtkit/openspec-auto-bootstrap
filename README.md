@@ -20,7 +20,7 @@
 - **仓库内技能**：`.claude/skills/openspec-auto`、`.agents/skills/openspec-auto`
 - **仓库内 hooks**：Claude Code / Codex 分别挂钩
 - **仓库内工具脚本**：`tools/openspec/*`
-- **外部安装器**：本目录下的 `install.sh`
+- **外部安装器**：发布后的 `openspec-auto` 单文件二进制
 
 这样做的好处是：
 
@@ -55,9 +55,15 @@
 ```text
 openspec-auto-bootstrap/
 ├── README.md                                # 说明文档：安装方法、运行流程、CI 接入方式
-├── install.sh                               # 安装器：把 templates/repo 落到目标业务仓库
-├── uninstall.sh                             # 卸载器：删除安装进去的规则、hooks、skills、工具脚本
-├── doctor.sh                                # 体检入口：转调目标仓库 tools/openspec/healthcheck.sh
+├── go.mod                                   # Go module 定义
+├── cmd/
+│   └── openspec-auto/                       # CLI 入口：install / uninstall / doctor / version
+├── internal/
+│   ├── bootstrap/                           # 安装、卸载、doctor 的核心实现
+│   └── cli/                                 # 子命令解析与输出
+├── install.sh                               # 兼容入口脚本
+├── uninstall.sh                             # 兼容入口脚本
+├── doctor.sh                                # 兼容入口脚本
 ├── .gitignore                               # 忽略 .DS_Store / __pycache__ / *.pyc
 ├── docs/                                    # 文档产物目录
 │   └── diagrams/                            # README 里的时序图导出目录（SVG + PNG）
@@ -100,20 +106,22 @@ openspec-auto-bootstrap/
 │               └── sync_templates.sh        # 模板维护脚本，主要同步执行权限
 └── tests/                                   # bootstrap 自己的回归测试
     ├── __init__.py                          # Python unittest 包标记
+    ├── test_cli_binary.py                   # Go CLI 的安装/卸载/doctor 回归测试
     ├── test_hook_common.py                  # 多 active changes / current change 状态回归测试
+    ├── test_repo_hygiene.py                 # 仓库文本内容的绝对路径泄漏检查
     ├── test_validate_repo.py                # CI diff / base-ref 校验回归测试
-    └── test_install_script.py               # install.sh 的 --force 行为回归测试
+    └── test_install_script.py               # 旧 shell 安装入口的兼容回归测试
 ```
 
 设计原则：
 
 - `templates/repo/` 里的内容就是最终要落到业务仓库里的文件
-- 根目录脚本只负责安装、卸载、体检
+- `openspec-auto` CLI 负责安装、卸载、体检；根目录 shell 脚本仅保留兼容入口
 - 仓库落地后，即使不保留这个 bootstrap 目录，仓库本身仍然可以工作
 
 ### 2.1 安装后目标业务仓库会生成哪些文件
 
-下面这棵树不是 bootstrap 仓库本身，而是 `install.sh` 安装到目标业务仓库后的典型结果：
+下面这棵树不是 bootstrap 仓库本身，而是 `openspec-auto install` 落到目标业务仓库后的典型结果：
 
 ```text
 your-repo/
@@ -175,9 +183,9 @@ your-repo/
 从职责分层看，这些文件可以分成 6 层：
 
 1. 生命周期层：
-   - `install.sh`
-   - `uninstall.sh`
-   - `doctor.sh`
+   - `openspec-auto install`
+   - `openspec-auto uninstall`
+   - `openspec-auto doctor`
    负责安装、卸载、体检，不参与每轮请求的运行时判断。
 
 2. 规则层：
@@ -500,10 +508,23 @@ sequenceDiagram
 
 ## 4. 快速安装
 
-假设你要把它接到业务仓库：
+先构建二进制：
 
 ```bash
-/Users/xiaozhaofu/openspec-auto-bootstrap/install.sh /absolute/path/to/your-repo
+go build -o ./bin/openspec-auto ./cmd/openspec-auto
+```
+
+如果你希望在任何目录直接使用，可以把它放到常用的可执行目录：
+
+```bash
+cp ./bin/openspec-auto /usr/local/bin/openspec-auto
+cp ./bin/openspec-auto "$HOME/go/bin/openspec-auto"
+```
+
+然后把它接到业务仓库：
+
+```bash
+openspec-auto install /absolute/path/to/your-repo
 ```
 
 安装完成后，直接在目标仓库里打开 Claude Code 或 Codex，然后正常说需求即可：
@@ -522,7 +543,7 @@ sequenceDiagram
 
 ## 5. 安装脚本会做什么
 
-`install.sh` 会按下面顺序工作。
+`openspec-auto install` 会按下面顺序工作。
 
 ### 5.1 校验本机环境
 
@@ -622,7 +643,7 @@ codex_hooks = true
 ### 6.1 `--force`
 
 ```bash
-./install.sh --force /path/to/repo
+openspec-auto install --force /path/to/repo
 ```
 
 含义：
@@ -633,7 +654,7 @@ codex_hooks = true
 ### 6.2 `--skip-codex-user-config`
 
 ```bash
-./install.sh --skip-codex-user-config /path/to/repo
+openspec-auto install --skip-codex-user-config /path/to/repo
 ```
 
 含义：
@@ -646,7 +667,7 @@ codex_hooks = true
 ### 6.3 `--skip-openspec-init`
 
 ```bash
-./install.sh --skip-openspec-init /path/to/repo
+openspec-auto install --skip-openspec-init /path/to/repo
 ```
 
 含义：
@@ -669,7 +690,7 @@ codex_hooks = true
 - 回滚被覆盖的配置文件
 - 审计本次安装改了什么
 
-这也是为什么生产环境建议所有接入都通过 `install.sh`，而不是人工拷文件。
+这也是为什么生产环境建议所有接入都通过 `openspec-auto install`，而不是人工拷文件。
 
 ---
 
@@ -922,13 +943,13 @@ Codex 侧同样多层防御：
 ### 13.1 体检 bootstrap 自身
 
 ```bash
-/Users/xiaozhaofu/openspec-auto-bootstrap/doctor.sh
+openspec-auto doctor
 ```
 
 ### 13.2 体检某个仓库
 
 ```bash
-/Users/xiaozhaofu/openspec-auto-bootstrap/doctor.sh /absolute/path/to/repo
+openspec-auto doctor /absolute/path/to/repo
 ```
 
 实际会调用仓库里的：
@@ -952,7 +973,7 @@ tools/openspec/healthcheck.sh
 卸载命令：
 
 ```bash
-/Users/xiaozhaofu/openspec-auto-bootstrap/uninstall.sh /absolute/path/to/repo
+openspec-auto uninstall /absolute/path/to/repo
 ```
 
 会移除：
