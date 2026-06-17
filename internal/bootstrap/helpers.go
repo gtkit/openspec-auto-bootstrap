@@ -254,7 +254,10 @@ func upsertManagedBlock(destPath string, block []byte) error {
 	var updated string
 	switch {
 	case pattern.MatchString(content):
-		updated = pattern.ReplaceAllString(content, blockText)
+		// Use the literal replacer so block content containing "$" (for
+		// example "$HOME" in a shell example) is not interpreted as a regexp
+		// expansion reference.
+		updated = pattern.ReplaceAllLiteralString(content, blockText)
 	case strings.TrimSpace(content) != "":
 		updated = strings.TrimRight(content, "\n") + "\n\n" + blockText + "\n"
 	default:
