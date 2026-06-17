@@ -409,9 +409,10 @@ Backup: $BACKUP_DIR
 
 Next:
   1. Open Claude Code or Codex in the repo root.
-  2. Ask for a behavior-changing task normally, for example:
-     - 实现订单超时自动取消
-     - 修复支付回调重复入库
-     - 把会员试用逻辑改成 7 天
+  2. Ask for a behavior-changing task normally. The lines below are
+     only illustrative samples, not tasks detected in your repo:
+     - 例如「实现订单超时自动取消」
+     - 例如「修复支付回调重复入库」
+     - 例如「把会员试用逻辑改成 7 天」
   3. The repository will route the request through OpenSpec automatically.
 EOF

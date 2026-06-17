@@ -150,10 +150,11 @@ func Install(repoPath string, opts InstallOptions) error {
 
 	fmt.Fprintf(opts.Stdout, "\nInstall complete.\n\nRepo:   %s\nBackup: %s\n\nNext:\n", repoDir, backupDir)
 	fmt.Fprintln(opts.Stdout, "  1. Open Claude Code or Codex in the repo root.")
-	fmt.Fprintln(opts.Stdout, "  2. Ask for a behavior-changing task normally, for example:")
-	fmt.Fprintln(opts.Stdout, "     - 实现订单超时自动取消")
-	fmt.Fprintln(opts.Stdout, "     - 修复支付回调重复入库")
-	fmt.Fprintln(opts.Stdout, "     - 把会员试用逻辑改成 7 天")
+	fmt.Fprintln(opts.Stdout, "  2. Ask for a behavior-changing task normally. The lines below are")
+	fmt.Fprintln(opts.Stdout, "     only illustrative samples, not tasks detected in your repo:")
+	fmt.Fprintln(opts.Stdout, "     - 例如「实现订单超时自动取消」")
+	fmt.Fprintln(opts.Stdout, "     - 例如「修复支付回调重复入库」")
+	fmt.Fprintln(opts.Stdout, "     - 例如「把会员试用逻辑改成 7 天」")
 	fmt.Fprintln(opts.Stdout, "  3. The repository will route the request through OpenSpec automatically.")
 	return nil
 }

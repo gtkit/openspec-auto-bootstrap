@@ -575,11 +575,11 @@ cp ./bin/openspec-auto "$HOME/go/bin/openspec-auto"
 openspec-auto install /absolute/path/to/your-repo
 ```
 
-安装完成后，直接在目标仓库里打开 Claude Code 或 Codex，然后正常说需求即可：
+安装完成后，直接在目标仓库里打开 Claude Code 或 Codex，然后正常说需求即可（下面只是示例，并非当前项目的真实任务）：
 
-- `实现订单超时自动取消`
-- `修复支付回调重复入库`
-- `把会员试用逻辑改成 7 天`
+- `例如：实现订单超时自动取消`
+- `例如：修复支付回调重复入库`
+- `例如：把会员试用逻辑改成 7 天`
 
 你不需要手动输入：
 
