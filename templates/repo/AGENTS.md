@@ -32,4 +32,13 @@ Guardrails:
 - Do not silently choose among multiple plausible active changes.
 - Do not start application edits before the change is apply-ready unless the user explicitly skips OpenSpec.
 - Treat OpenSpec CLI output as the source of truth for change state.
+
+## Project Layout Defaults
+
+When bootstrapping or restructuring a fullstack application in a repository that uses this template, prefer:
+
+- backend application code under `backend/`
+- frontend application code under `frontend/`
+
+Avoid introducing new default conventions such as `api/` or `web/` unless the user explicitly requests them for that repository.
 <!-- OPENSPEC-AUTO:END -->
