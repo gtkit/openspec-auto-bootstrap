@@ -243,6 +243,37 @@ func ensureLineOnce(destPath, line string) error {
 	return writeTextFile(destPath, updated, 0o644)
 }
 
+// resolveGitInfoExclude 定位仓库的 .git/info/exclude 路径。.git 是文件时（worktree /
+// submodule）读取其中的 gitdir: 指向。返回空字符串表示 repoDir 不是 git 仓库。
+func resolveGitInfoExclude(repoDir string) (string, error) {
+	gitPath := filepath.Join(repoDir, ".git")
+	info, err := os.Stat(gitPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+
+	gitDir := gitPath
+	if !info.IsDir() {
+		content, err := os.ReadFile(gitPath)
+		if err != nil {
+			return "", err
+		}
+		const prefix = "gitdir:"
+		line := strings.TrimSpace(string(content))
+		if !strings.HasPrefix(line, prefix) {
+			return "", nil
+		}
+		gitDir = strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		if !filepath.IsAbs(gitDir) {
+			gitDir = filepath.Join(repoDir, gitDir)
+		}
+	}
+	return filepath.Join(gitDir, "info", "exclude"), nil
+}
+
 func upsertManagedBlock(destPath string, block []byte) error {
 	content, err := readIfExists(destPath)
 	if err != nil {

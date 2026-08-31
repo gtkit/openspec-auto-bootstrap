@@ -338,12 +338,23 @@ backup_path "$REPO_DIR/AGENTS.md" "$REPO_DIR"
 upsert_managed_block "$REPO_DIR/AGENTS.md" "$BOOTSTRAP_DIR/templates/repo/AGENTS.md"
 
 backup_path "$REPO_DIR/CLAUDE.md" "$REPO_DIR"
-ensure_line_once "$REPO_DIR/CLAUDE.md" "@AGENTS.md"
 upsert_managed_block "$REPO_DIR/CLAUDE.md" "$BOOTSTRAP_DIR/templates/repo/CLAUDE.md"
 
-log "Ensuring runtime directories are git-ignored"
-ensure_line_once "$REPO_DIR/.gitignore" ".openspec-auto/"
-ensure_line_once "$REPO_DIR/.gitignore" ".openspec-auto-backup/"
+log "Ensuring runtime directories are ignored locally (.git/info/exclude)"
+# 这两个目录是本工具的运行产物。忽略规则只写进本地未跟踪的 .git/info/exclude：
+# 写进被跟踪的 .gitignore 会把工具痕迹带进版本库，也会污染团队共享的忽略清单。
+GIT_DIR_PATH="$(git -C "$REPO_DIR" rev-parse --git-dir 2>/dev/null || true)"
+if [ -n "$GIT_DIR_PATH" ]; then
+  case "$GIT_DIR_PATH" in
+    /*) ;;
+    *) GIT_DIR_PATH="$REPO_DIR/$GIT_DIR_PATH" ;;
+  esac
+  mkdir -p "$GIT_DIR_PATH/info"
+  ensure_line_once "$GIT_DIR_PATH/info/exclude" ".openspec-auto/"
+  ensure_line_once "$GIT_DIR_PATH/info/exclude" ".openspec-auto-backup/"
+else
+  warn "No git repository detected; skipped local ignore rules for .openspec-auto/."
+fi
 
 log "Installing repo-local hook configs and skills"
 copy_file "$BOOTSTRAP_DIR/templates/repo/.claude/hooks/openspec_context.py" "$REPO_DIR/.claude/hooks/openspec_context.py"

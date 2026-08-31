@@ -73,19 +73,28 @@ func Install(repoPath string, opts InstallOptions) error {
 	if err := backupPath(filepath.Join(repoDir, "CLAUDE.md"), repoDir, backupDir); err != nil {
 		return err
 	}
-	if err := ensureLineOnce(filepath.Join(repoDir, "CLAUDE.md"), "@AGENTS.md"); err != nil {
-		return err
-	}
 	if err := upsertManagedBlock(filepath.Join(repoDir, "CLAUDE.md"), claudeBlock); err != nil {
 		return err
 	}
 
-	log.log("Ensuring runtime directories are git-ignored")
-	if err := ensureLineOnce(filepath.Join(repoDir, ".gitignore"), ".openspec-auto/"); err != nil {
+	// 运行产物的忽略规则只写本地未跟踪的 .git/info/exclude，不写被跟踪的 .gitignore：
+	// 后者会把工具痕迹带进版本库，也会污染团队共享的忽略清单。
+	log.log("Ensuring runtime directories are ignored locally (.git/info/exclude)")
+	excludePath, err := resolveGitInfoExclude(repoDir)
+	if err != nil {
 		return err
 	}
-	if err := ensureLineOnce(filepath.Join(repoDir, ".gitignore"), ".openspec-auto-backup/"); err != nil {
-		return err
+	if excludePath == "" {
+		log.warn("No git repository detected; skipped local ignore rules for .openspec-auto/.")
+	} else {
+		if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
+			return err
+		}
+		for _, line := range []string{".openspec-auto/", ".openspec-auto-backup/"} {
+			if err := ensureLineOnce(excludePath, line); err != nil {
+				return err
+			}
+		}
 	}
 
 	log.log("Installing repo-local hook configs and skills")

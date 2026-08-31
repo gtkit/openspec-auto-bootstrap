@@ -46,6 +46,15 @@ Do not use this for:
    - Run `openspec validate "<name>" --type change --strict --json --no-interactive`
    - Run the repository's own tests and validations
    - If validation exposes a design or scope gap, update the OpenSpec artifacts instead of guessing
+7. Archive the finished change:
+   - Confirm every task in `tasks.md` is checked off
+   - Run `openspec archive "<name>" -y` so the spec delta merges into `openspec/specs/`
+   - Use `--skip-specs` for tooling, infrastructure, or docs-only changes
+   - Archive one change at a time and re-run validation after each, so overlapping spec deltas surface early
+   - Verify each archive from the output, not the exit code: a delta whose header is missing from the
+     baseline makes `openspec archive` print `Aborted. No files were changed.` while still exiting 0
+   - When a delta aborts, reconcile it against the code before retrying — the baseline spec may carry
+     outdated content from an earlier archive, in which case fix the spec rather than the code
 
 ## Guardrails
 
@@ -53,3 +62,4 @@ Do not use this for:
 - Do not start application edits before the change is apply-ready unless the user explicitly skips OpenSpec
 - Do not ask the user to manually type `/opsx:*` or raw `openspec` commands unless they asked for manual control
 - Treat OpenSpec CLI output as the source of truth
+- Do not leave a completed change in `openspec/changes/`; an unarchived change makes `openspec/specs/` stale

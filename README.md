@@ -13,6 +13,7 @@
   - 生成 proposal / design / specs / tasks
   - 在 apply-ready 后再改业务代码
   - 在收尾时做 validate 和常规测试
+  - 任务全部完成后归档 change，把 spec delta 合并回 `openspec/specs/`
 
 这套 bootstrap 采用的是：
 
@@ -70,7 +71,7 @@ openspec-auto-bootstrap/
 ├── templates/                               # 模板目录：这里的 repo/ 就是最终安装源
 │   └── repo/                                # 目标业务仓库模板根目录
 │       ├── AGENTS.md                        # 仓库级 OpenSpec-first 规则主入口
-│       ├── CLAUDE.md                        # Claude 入口，负责把 Claude 引到 AGENTS.md
+│       ├── CLAUDE.md                        # Claude 入口，自带完整 OpenSpec 工作流块
 │       ├── .claude/                         # Claude Code 专用配置
 │       │   ├── settings.json                # Claude hooks 注册表
 │       │   ├── hooks/                       # Claude 四类 hook 的脚本目录
@@ -126,7 +127,7 @@ openspec-auto-bootstrap/
 ```text
 your-repo/
 ├── AGENTS.md                                # [模板注入] OpenSpec-first 规则主入口
-├── CLAUDE.md                                # [模板注入] Claude 入口，并补 @AGENTS.md
+├── CLAUDE.md                                # [模板注入] Claude 入口，托管块自包含工作流
 ├── .claude/                                 # [模板拷贝] Claude 运行层
 │   ├── settings.json                        # Claude hooks 注册表
 │   ├── hooks/
@@ -622,19 +623,33 @@ openspec init --tools none /path/to/repo
 - `openspec/changes/`
 - OpenSpec 配置文件
 
-### 5.3 安装仓库内规则
+### 5.3 忽略运行产物（只写本地）
+
+`.openspec-auto/`（状态）与 `.openspec-auto-backup/`（安装备份）的忽略规则写进目标仓库的
+`.git/info/exclude`，**不写被跟踪的 `.gitignore`**：
+
+- `.gitignore` 会随提交进版本库，把"本仓库在用 AI 工具"这件事暴露给所有人
+- 团队共享的忽略清单不该被单人的本地工具产物污染
+- `.git/info/exclude` 只在本机生效，效果等同，且不进版本库
+
+`.git` 是文件的情况（worktree / submodule）会解析其中的 `gitdir:` 指向；目标目录不是 git 仓库时跳过并告警。
+
+### 5.4 安装仓库内规则
 
 脚本会把一个 **managed block** 注入到：
 
 - `AGENTS.md`
 - `CLAUDE.md`
 
-其中：
+两个文件的托管块都自带完整的 OpenSpec 工作流，**互不导入**：
 
-- `AGENTS.md` 是真正的流程约束源
-- `CLAUDE.md` 负责把 Claude 引到 `@AGENTS.md`
+- `AGENTS.md` 是流程约束源，Codex 与其他 agent 工具读它
+- `CLAUDE.md` 携带同一份工作流，外加两条 Claude 专属说明（优先用 `openspec-auto` skill、不把 `openspec` 命令甩回给用户）
 
-### 5.4 安装技能
+不再往 `CLAUDE.md` 注入 `@AGENTS.md` 导入行：当目标仓库的 `CLAUDE.md` 本身已承载完整项目规则时，
+该导入会让同一份规则在 Claude 的上下文里出现两遍。让每个入口文件自包含即可避免。
+
+### 5.5 安装技能
 
 会安装两份 `openspec-auto`：
 
@@ -646,7 +661,7 @@ openspec init --tools none /path/to/repo
 - Claude Code 走 `.claude/skills`
 - Codex 官方技能目录走 `.agents/skills`
 
-### 5.5 安装 hooks
+### 5.6 安装 hooks
 
 会安装：
 
@@ -655,7 +670,7 @@ openspec init --tools none /path/to/repo
 - Claude hook 配置：`.claude/settings.json`
 - Codex hook 配置：`.codex/hooks.json`
 
-### 5.6 安装仓库内工具脚本
+### 5.7 安装仓库内工具脚本
 
 会安装到：
 
@@ -667,7 +682,7 @@ openspec init --tools none /path/to/repo
 - `tools/openspec/validate_repo.py`
 - `tools/openspec/sync_templates.sh`
 
-### 5.7 修补用户级 Codex 配置
+### 5.8 修补用户级 Codex 配置
 
 默认会尝试把下面这项确保写进 `~/.codex/config.toml`：
 
@@ -862,6 +877,11 @@ Codex 侧：
 8. 收尾时运行：
    - `openspec validate "<name>" --type change --strict --json --no-interactive`
    - 仓库自己的测试和校验
+9. 任务全部勾完且校验通过后归档：
+   - `openspec archive "<name>" -y`，把 spec delta 合并回 `openspec/specs/`
+   - 工具链 / 基础设施 / 纯文档类变更加 `--skip-specs`
+   - 一次只归档一个 change，每次归档后重新校验，让重叠的 spec delta 尽早暴露
+   - 用输出而不是 exit code 判断归档结果：delta 的 header 在基线 spec 里找不到时，`openspec archive` 会打印 `Aborted. No files were changed.` 但仍返回 0
 
 这个 skill 的设计重点是：
 
